@@ -1,4 +1,4 @@
-from .anemoi_sim import AnemoiSim
+#from .anemoi_sim import AnemoiSim
 from .neural_sim import NeuralModelSim
 
 class SimulatorFactory:

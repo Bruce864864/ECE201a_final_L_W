@@ -37,7 +37,7 @@ from typing import List, Tuple
 import csv
 
 sns.set()
-DEBUG_THERM = True
+
 # how many times*min_dist should we move
 MOVE_MULTIPLIER = 1
 # how much should we inflate for overlap checking
@@ -59,8 +59,7 @@ conductivity_values = {
     "EpAg": 1.6,
     "Infill_material": 19,
     "Polymer1": 675,
-    "TIM0p5": 1.0, # 0.5 # 100.0 # 
-    "Isolator": 0.05
+    "TIM0p5": 1.0 # 0.5 # 100.0 # 
 }
 # EpAg is Epoxy, Silver filled used in layer_definitions.xml for bonding layers 5nm_HBM2HBM_metal.
 
@@ -174,8 +173,6 @@ def box_color(box):
         return "brown"
     if "Dummy_Si" in box.name:
         return "cyan"
-    if "isolator" in box.name.lower():
-        return "yellow"
     return "red"
 
 
@@ -190,7 +187,6 @@ def draw_fig(boxes,out_dir,out_name,limits):
         Patch(facecolor="green", label="TIM"),
         Patch(facecolor="brown", label="Bonding"),
         Patch(facecolor="cyan", label="Dummy Si"),
-        Patch(facecolor="yellow", label="Isolator"),
     ]
     boxes_sorted = sorted(
         boxes,
@@ -276,42 +272,47 @@ def determine_draw_lim_3d(boxes):
 #     plt.savefig(out_dir + '/' + out_name + '3D.png')
 #     plt.close()
 
-def draw_fig_3D_zoom(boxes, out_dir, out_name, limits, z_scale=6.0):
+def draw_fig_3D_zoom(boxes, out_dir, out_name, limits):
     fig = plt.figure()
     ax = fig.add_subplot(111, projection='3d')
-
+    
     collections = []
 
     for box in boxes:
-        z0 = box.start_z * z_scale
-        z1 = (box.start_z + box.height) * z_scale
-
         x = [box.start_x, box.start_x + box.width, box.start_x + box.width, box.start_x, box.start_x]
         y = [box.start_y, box.start_y, box.start_y + box.length, box.start_y + box.length, box.start_y]
-        z = [z0] * 5
-        z_top = [z1] * 5
+        z = [box.start_z] * 5  # base z level
+        z_top = [box.start_z + box.height] * 5  # top z level
 
-        verts = [list(zip(x, y, z)), list(zip(x, y, z_top))]
+        verts = [list(zip(x, y, z)),
+                 list(zip(x, y, z_top))]
 
+        # Sides of the box
         for i in range(4):
-            verts.append([(x[i], y[i], z[i]), (x[i+1], y[i+1], z[i+1]), (x[i+1], y[i+1], z_top[i+1]), (x[i], y[i], z_top[i])])
+            verts.append([(x[i], y[i], z[i]), (x[i+1], y[i+1], z[i+1]), 
+                          (x[i+1], y[i+1], z_top[i+1]), (x[i], y[i], z_top[i])])
+
+        zpos = box.start_x
 
         color = box_color(box)
-        poly = Poly3DCollection(verts, facecolors=color, edgecolors='k', alpha=0.7)
-        poly.set_sort_zpos(box.start_x)
-        collections.append(poly)
 
-    for poly in collections:
+        poly = Poly3DCollection(verts, facecolors=color, edgecolors='k', alpha=0.7)
+        poly.set_sort_zpos(zpos)
+        collections.append((poly, box))
+
+    for poly, box in collections:
         ax.add_collection3d(poly)
+        # Uncomment to add labels
+        # ax.text(box.start_x + box.width / 2, box.start_y + box.length / 2, box.start_z + box.height / 2, box.name, ha='center', va='center', color='white')
 
     ax.set_xlim(limits[0], limits[1])
     ax.set_ylim(limits[2], limits[3])
-    ax.set_zlim(limits[4] * z_scale, limits[5] * z_scale)
+    ax.set_zlim(limits[4], limits[5])
 
-    ax.view_init(elev=18, azim=-30)
-
+    ax.view_init(elev=18, azim=-30)  # Adjust the viewing angle
+    ax.dist = 10  # Decrease this value to zoom in
     try:
-        ax.set_box_aspect((limits[1] - limits[0], limits[3] - limits[2], (limits[5] - limits[4]) * z_scale))
+        ax.set_box_aspect((limits[1]-limits[0], limits[3]-limits[2], limits[5]-limits[4]))
     except Exception:
         pass
 
@@ -320,7 +321,7 @@ def draw_fig_3D_zoom(boxes, out_dir, out_name, limits, z_scale=6.0):
     ax.set_xlabel("")
     ax.set_ylabel("")
     ax.grid(False)
-
+    
     legend_items = [
         Patch(facecolor="orange", label="GPU"),
         Patch(facecolor="blue", label="HBM"),
@@ -329,13 +330,16 @@ def draw_fig_3D_zoom(boxes, out_dir, out_name, limits, z_scale=6.0):
         Patch(facecolor="green", label="TIM"),
         Patch(facecolor="brown", label="Bonding"),
         Patch(facecolor="cyan", label="Dummy Si"),
-        Patch(facecolor="yellow", label="Isolator"),
     ]
 
     ax.legend(handles=legend_items, loc="center left", bbox_to_anchor=(1.02, 0.5), frameon=True)
     plt.tight_layout()
     plt.savefig(out_dir + '/' + out_name + '3D.png', dpi=100, bbox_inches="tight")
     plt.close()
+    
+    #plt.tight_layout()
+    #plt.savefig(out_dir + '/' + out_name + '3D.png', dpi=200)
+    #plt.close()
 
 def determine_draw_lim(boxes):
     # find the min and max x and y
@@ -938,7 +942,7 @@ def effective_k_for_box(box):
     if cls == "bonding":
         return 20.0
     if cls == "TIM":
-        return conductivity_values["TIM0p5"]
+        return 1.0
     if cls == "Dummy_Si":
         return 105.0
     if cls == "HBM":
@@ -1188,8 +1192,6 @@ def classify_box(box):
     cp = getattr(box, "chiplet_parent", None)
     t = cp.get_chiplet_type() if cp is not None else ""
 
-    if "isolator" in name.lower():
-        return "isolator"
     if "bonding" in name:
         return "bonding"
     if "TIM" in name:
@@ -1205,366 +1207,11 @@ def classify_box(box):
     if "Power_Source" in name or t == "Power_Source":
         return "Power_Source"
     return "other"
-
-def write_results_summary(results, out_dir):
-    import os
-
-    items = []
-    for k, v in results.items():
-        try:
-            peak = v[0]
-        except Exception:
-            continue
-        items.append((peak, k, v))
-    items.sort(reverse=True)
-
-    with open(os.path.join(out_dir, "thermal_summary.txt"), "w") as f:
-        f.write("Top 20 hottest boxes\n")
-        f.write("=" * 80 + "\n")
-        for peak, k, v in items[:20]:
-            f.write(
-                f"{k:45s} "
-                f"peak={peak:.3f} avg={v[1]:.3f} "
-                f"Rx={v[2]:.3e} Ry={v[3]:.3e} Rz={v[4]:.3e}\n"
-            )
-
-def write_grouped_summary(results, out_dir):
-    import os
-
-    groups = {}
-    for k, v in results.items():
-        try:
-            peak = v[0]
-        except Exception:
-            continue
-        g = classify_result_name(k)
-        groups.setdefault(g, []).append((k, v))
-
-    summary_path = os.path.join(out_dir, "thermal_grouped_summary.txt")
-    with open(summary_path, "w") as f:
-        for g in sorted(groups.keys()):
-            f.write(f"== {g} ==\n")
-            arr = sorted(groups[g], key=lambda x: x[1][0], reverse=True)
-            for k, v in arr[:10]:
-                f.write(f"{k:45s} peak={v[0]:.3f} avg={v[1]:.3f}\n")
-            f.write("\n")
-
-    print("Saved grouped summary to", summary_path)
-
-def extract_key_metrics(results):
-    gpu_peak = None
-    tim_peak = None
-    hottest_hbm_peak = None
-
-    for name, v in results.items():
-        try:
-            peak = float(v[0])
-        except Exception:
-            continue
-
-        if (".GPU" in name or name.endswith("GPU")) and gpu_peak is None:
-            gpu_peak = peak
-
-        if "TIM" in name:
-            if tim_peak is None or peak > tim_peak:
-                tim_peak = peak
-
-        if "HBM" in name:
-            if hottest_hbm_peak is None or peak > hottest_hbm_peak:
-                hottest_hbm_peak = peak
-
-    return {
-        "gpu_peak": gpu_peak,
-        "tim_peak": tim_peak,
-        "hottest_hbm_peak": hottest_hbm_peak,
-    }
-     
-def write_tim_sweep_summary(rows, out_dir):
-    import os
-
-    path = os.path.join(out_dir, "tim_sweep_summary.txt")
-    with open(path, "w") as f:
-        f.write("TIM conductivity sweep summary\n")
-        f.write("=" * 80 + "\n")
-        f.write(f"{'TIM_k':>10} {'GPU_peak':>12} {'HBM_peak':>12} {'TIM_peak':>12}\n")
-        f.write("-" * 80 + "\n")
-        for row in rows:
-            f.write(
-                f"{row['tim_k']:>10.3f} "
-                f"{row['gpu_peak']:>12.3f} "
-                f"{row['hbm_peak']:>12.3f} "
-                f"{row['tim_peak']:>12.3f}\n"
-            )
-
-    print("Saved TIM sweep summary to", path)    
-
-def write_htc_sweep_summary(rows, out_dir):
-    import os
-
-    path = os.path.join(out_dir, "htc_sweep_summary.txt")
-    with open(path, "w") as f:
-        f.write("HTC sweep summary\n")
-        f.write("=" * 80 + "\n")
-        f.write(f"{'HTC':>10} {'GPU_peak':>12} {'HBM_peak':>12} {'TIM_peak':>12}\n")
-        f.write("-" * 80 + "\n")
-        for row in rows:
-            f.write(
-                f"{row['htc']:>10.3f} "
-                f"{row['gpu_peak']:>12.3f} "
-                f"{row['hbm_peak']:>12.3f} "
-                f"{row['tim_peak']:>12.3f}\n"
-            )
-
-    print("Saved HTC sweep summary to", path)
-
-def run_single_case(
-    boxes,
-    bonding_box_list,
-    TIM_boxes,
-    isolator_boxes,
-    heatsink_obj,
-    heatsink_list,
-    heatsink_name,
-    bonding_list,
-    bonding_name_type_dict,
-    is_repeat,
-    min_TIM_height,
-    power_dict,
-    anemoi_parameter_ID,
-    layers
-):
-    results = simulator_simulate_grid(
-        boxes,
-        bonding_box_list,
-        TIM_boxes,
-        isolator_boxes=isolator_boxes,
-        heatsink_obj=heatsink_obj,
-        heatsink_list=heatsink_list,
-        heatsink_name=heatsink_name,
-        bonding_list=bonding_list,
-        bonding_name_type_dict=bonding_name_type_dict,
-        is_repeat=is_repeat,
-        min_TIM_height=min_TIM_height,
-        power_dict=power_dict,
-        anemoi_parameter_ID=anemoi_parameter_ID,
-        layers=layers
-    )
-    return results    
-
-def get_gpu_box(boxes):
-    for b in boxes:
-        cp = getattr(b, "chiplet_parent", None)
-        if cp is not None and cp.get_chiplet_type() == "GPU":
-            return b
-    return None
-
-def get_hbm_boxes(boxes):
-    out = []
-    for b in boxes:
-        cp = getattr(b, "chiplet_parent", None)
-        if cp is not None and cp.get_chiplet_type() == "HBM":
-            out.append(b)
-    return out
-
-def get_hbm_bounds(hbm_boxes):
-    x0 = min(b.start_x for b in hbm_boxes)
-    x1 = max(b.start_x + b.width for b in hbm_boxes)
-    y0 = min(b.start_y for b in hbm_boxes)
-    y1 = max(b.start_y + b.length for b in hbm_boxes)
-    return x0, x1, y0, y1
-
-def unique_gap_pairs(starts, ends, max_gap=1.0):
-    pairs = []
-    ss = sorted(set(round(v, 6) for v in starts))
-    ee = sorted(set(round(v, 6) for v in ends))
-    for e in ee:
-        for s in ss:
-            g = s - e
-            if g > 1e-6 and g < max_gap:
-                pairs.append((e, s))
-    out = []
-    for a, b in sorted(pairs):
-        if not out:
-            out.append((a, b))
-        else:
-            pa, pb = out[-1]
-            if abs(a - pa) > 1e-6 or abs(b - pb) > 1e-6:
-                out.append((a, b))
-    return out
-
-def get_hbm_z_window(hbm_boxes, z_anchor="bottom", z_frac=0.35):
-    z0 = min(b.start_z for b in hbm_boxes)
-    z1 = max(b.start_z + b.height for b in hbm_boxes)
-    total = z1 - z0
-    if total <= 0:
-        return z0, z1
-    if z_anchor == "full":
-        return z0, z1
-    span = total * z_frac
-    if z_anchor == "top":
-        return z1 - span, z1
-    if z_anchor == "middle":
-        mid = 0.5 * (z0 + z1)
-        return mid - 0.5 * span, mid + 0.5 * span
-    return z0, z0 + span
-
-def create_hbm_channel_isolators(boxes, mode="channel_cross", fill_ratio=1.0, span_ratio=1.0, z_anchor="bottom", z_frac=0.35):
-    hbm_boxes = get_hbm_boxes(boxes)
-    if len(hbm_boxes) == 0:
-        return []
-
-    x0, x1, y0, y1 = get_hbm_bounds(hbm_boxes)
-    z_start, z_end = get_hbm_z_window(hbm_boxes, z_anchor=z_anchor, z_frac=z_frac)
-    h = z_end - z_start
-    if h <= 0:
-        return []
-
-    xs0 = [b.start_x for b in hbm_boxes]
-    xs1 = [b.start_x + b.width for b in hbm_boxes]
-    ys0 = [b.start_y for b in hbm_boxes]
-    ys1 = [b.start_y + b.length for b in hbm_boxes]
-
-    x_gaps = unique_gap_pairs(xs0, xs1)
-    y_gaps = unique_gap_pairs(ys0, ys1)
-
-    out = []
-    idx = 0
-
-    y_mid = 0.5 * (y0 + y1)
-    y_span = (y1 - y0) * span_ratio
-    y_a = y_mid - 0.5 * y_span
-    y_b = y_mid + 0.5 * y_span
-
-    x_mid = 0.5 * (x0 + x1)
-    x_span = (x1 - x0) * span_ratio
-    x_a = x_mid - 0.5 * x_span
-    x_b = x_mid + 0.5 * x_span
-
-    if mode in ["channel_x", "channel_cross"]:
-        for a, b in x_gaps:
-            gap = b - a
-            dx = gap * fill_ratio
-            xx = 0.5 * (a + b) - 0.5 * dx
-            if dx > 0:
-                out.append(Box(xx, y_a, z_start, dx, y_b - y_a, h, 0.0, "1:Isolator", 0.0, f"isolator_channel_x_{idx}"))
-                idx += 1
-
-    if mode in ["channel_y", "channel_cross"]:
-        for a, b in y_gaps:
-            gap = b - a
-            dy = gap * fill_ratio
-            yy = 0.5 * (a + b) - 0.5 * dy
-            if dy > 0:
-                out.append(Box(x_a, yy, z_start, x_b - x_a, dy, h, 0.0, "1:Isolator", 0.0, f"isolator_channel_y_{idx}"))
-                idx += 1
-
-    return out
-
-def create_hbm_array_frame_isolators(boxes, thickness=0.03, z_anchor="bottom", z_frac=0.35):
-    gpu = get_gpu_box(boxes)
-    hbm_boxes = get_hbm_boxes(boxes)
-    if gpu is None or len(hbm_boxes) == 0:
-        return []
-
-    hx0, hx1, hy0, hy1 = get_hbm_bounds(hbm_boxes)
-    z_start, z_end = get_hbm_z_window(hbm_boxes, z_anchor=z_anchor, z_frac=z_frac)
-    h = z_end - z_start
-    if h <= 0:
-        return []
-
-    x0 = max(gpu.start_x, hx0 - thickness)
-    x1 = min(gpu.start_x + gpu.width, hx1 + thickness)
-    y0 = max(gpu.start_y, hy0 - thickness)
-    y1 = min(gpu.start_y + gpu.length, hy1 + thickness)
-
-    out = []
-    out.append(Box(x0, y0, z_start, x1 - x0, thickness, h, 0.0, "1:Isolator", 0.0, "isolator_frame_bottom"))
-    out.append(Box(x0, y1 - thickness, z_start, x1 - x0, thickness, h, 0.0, "1:Isolator", 0.0, "isolator_frame_top"))
-    out.append(Box(x0, y0, z_start, thickness, y1 - y0, h, 0.0, "1:Isolator", 0.0, "isolator_frame_left"))
-    out.append(Box(x1 - thickness, y0, z_start, thickness, y1 - y0, h, 0.0, "1:Isolator", 0.0, "isolator_frame_right"))
-    return out
-
-def create_isolator_boxes(boxes, isolator_mode="none", isolator_fill_ratio=1.0, isolator_span_ratio=1.0, isolator_thickness=0.03, isolator_z_anchor="bottom", isolator_z_frac=0.35):
-    if isolator_mode == "none":
-        return []
-    if isolator_mode == "channel_x":
-        return create_hbm_channel_isolators(
-            boxes,
-            mode="channel_x",
-            fill_ratio=isolator_fill_ratio,
-            span_ratio=isolator_span_ratio,
-            z_anchor=isolator_z_anchor,
-            z_frac=isolator_z_frac
-        )
-    if isolator_mode == "channel_y":
-        return create_hbm_channel_isolators(
-            boxes,
-            mode="channel_y",
-            fill_ratio=isolator_fill_ratio,
-            span_ratio=isolator_span_ratio,
-            z_anchor=isolator_z_anchor,
-            z_frac=isolator_z_frac
-        )
-    if isolator_mode == "channel_cross":
-        return create_hbm_channel_isolators(
-            boxes,
-            mode="channel_cross",
-            fill_ratio=isolator_fill_ratio,
-            span_ratio=isolator_span_ratio,
-            z_anchor=isolator_z_anchor,
-            z_frac=isolator_z_frac
-        )
-    if isolator_mode == "array_frame":
-        return create_hbm_array_frame_isolators(
-            boxes,
-            thickness=isolator_thickness,
-            z_anchor=isolator_z_anchor,
-            z_frac=isolator_z_frac
-        )
-    if isolator_mode == "frame_cross":
-        a = create_hbm_array_frame_isolators(
-            boxes,
-            thickness=isolator_thickness,
-            z_anchor=isolator_z_anchor,
-            z_frac=isolator_z_frac
-        )
-        b = create_hbm_channel_isolators(
-            boxes,
-            mode="channel_cross",
-            fill_ratio=isolator_fill_ratio,
-            span_ratio=isolator_span_ratio,
-            z_anchor=isolator_z_anchor,
-            z_frac=isolator_z_frac
-        )
-        return a + b
-    return []
     
-def filter_boxes_for_plot(boxes, mode="all"):
-    out = []
-    for b in boxes:
-        k = classify_box(b)
-        if mode == "all":
-            out.append(b)
-        elif mode == "chiplets":
-            if k in ["GPU", "HBM", "Dummy_Si", "substrate_like", "Power_Source"]:
-                out.append(b)
-        elif mode == "interface":
-            if k in ["GPU", "HBM", "bonding", "isolator", "Dummy_Si"]:
-                out.append(b)
-    return out
-
-
-    
-
-
-
-
-
 def simulator_simulate_grid(
     boxes,
     bonding_box_list,
     TIM_boxes,
-    isolator_boxes=None,
     heatsink_obj=None,
     heatsink_list=None,
     heatsink_name=None,
@@ -1576,51 +1223,40 @@ def simulator_simulate_grid(
     anemoi_parameter_ID=None,
     layers=None
 ):
-    if isolator_boxes is None:
-        isolator_boxes = []
-    all_boxes = list(boxes) + list(bonding_box_list) + list(TIM_boxes) + list(isolator_boxes)
+    all_boxes = list(boxes) + list(bonding_box_list) + list(TIM_boxes)
 
     xs, ys, zs = build_cut_planes(all_boxes)
     cells = build_cells_from_cuts(xs, ys, zs)
     cells = filter_tiny_cells(cells, min_dx=1e-3, min_dy=1e-3, min_dz=1e-4)
     cells = assign_cells_to_boxes(cells, all_boxes)
     assign_power_to_cells(cells)
-    
     #debug
-    if DEBUG_THERM:
-        print("DBG num_boxes =", len(all_boxes))
-        print("DBG x_cuts =", len(xs), "y_cuts =", len(ys), "z_cuts =", len(zs))
-        print("DBG num_cells_after_assign =", len(cells))
+    print("DBG num_boxes =", len(all_boxes))
+    print("DBG x_cuts =", len(xs), "y_cuts =", len(ys), "z_cuts =", len(zs))
+    print("DBG num_cells_after_assign =", len(cells))
 
-        gpu_cells = [c for c in cells if safe_chiplet_type_from_cell(c) == "GPU"]
-        hbm_cells = [c for c in cells if (safe_chiplet_type_from_cell(c) or "").startswith("HBM")]
+    gpu_cells = [c for c in cells if safe_chiplet_type_from_cell(c) == "GPU"]
+    hbm_cells = [c for c in cells if (safe_chiplet_type_from_cell(c) or "").startswith("HBM")]
 
-        print("DBG gpu_cells =", len(gpu_cells))
-        print("DBG hbm_cells =", len(hbm_cells))
-        print("DBG total_assigned_power =", sum(c["power"] for c in cells))
+    print("DBG gpu_cells =", len(gpu_cells))
+    print("DBG hbm_cells =", len(hbm_cells))
+    print("DBG total_assigned_power =", sum(c["power"] for c in cells))
 
-        if gpu_cells:
-            gpu_vols = sorted(c["dx"] * c["dy"] * c["dz"] for c in gpu_cells)
-            print("DBG GPU cell volume min/max =", gpu_vols[0], gpu_vols[-1])
+    if gpu_cells:
+        gpu_vols = sorted(c["dx"] * c["dy"] * c["dz"] for c in gpu_cells)
+        print("DBG GPU cell volume min/max =", gpu_vols[0], gpu_vols[-1])
 
-        if hbm_cells:
-            hbm_vols = sorted(c["dx"] * c["dy"] * c["dz"] for c in hbm_cells)
-            print("DBG HBM cell volume min/max =", hbm_vols[0], hbm_vols[-1])
+    if hbm_cells:
+        hbm_vols = sorted(c["dx"] * c["dy"] * c["dz"] for c in hbm_cells)
+        print("DBG HBM cell volume min/max =", hbm_vols[0], hbm_vols[-1])
     
-        bad_owner_cells = [
-            c for c in cells
-            if c.get("owner", None) is not None and getattr(c["owner"], "chiplet_parent", None) is None
-        ]
-        print("DBG bad_owner_cells =", len(bad_owner_cells))
-        if bad_owner_cells[:10]:
-            print("DBG bad_owner_examples =", [c["owner"].name for c in bad_owner_cells[:10]])
-        
-        isolator_cells = [
-            c for c in cells
-            if c.get("owner", None) is not None
-            and "isolator" in c["owner"].name.lower()
-        ]
-        print("DBG isolator_cells =", len(isolator_cells))            
+    bad_owner_cells = [
+        c for c in cells
+        if c.get("owner", None) is not None and getattr(c["owner"], "chiplet_parent", None) is None
+    ]
+    print("DBG bad_owner_cells =", len(bad_owner_cells))
+    if bad_owner_cells[:10]:
+        print("DBG bad_owner_examples =", [c["owner"].name for c in bad_owner_cells[:10]])            
     #debug
 
     hc = 15000.0
@@ -1651,19 +1287,9 @@ def simulator_simulate_grid(
 @click.option('--tim_cond_list', default = [10.0], multiple = True, help='The TIM conductivity list')
 @click.option('--infill_cond_list', default = [1.6], multiple = True, help='The infill conductivity list')
 @click.option('--underfill_cond_list', default = [1.6], multiple = True, help='The underfill conductivity list')
-@click.option('--use_isolator', default=False, type=bool)
-@click.option('--isolator_mode', default='none')
-@click.option('--isolator_fill_ratio', default=1.0, type=float)
-@click.option('--isolator_span_ratio', default=1.0, type=float)
-@click.option('--isolator_thickness', default=0.03, type=float)
-@click.option('--isolator_z_anchor', default='bottom')
-@click.option('--isolator_z_frac', default=0.35, type=float)
-def therm(therm_conf, heatsink_conf, bonding_conf, heatsink, out_dir, project_name, simtype="Anemoi", is_repeat=False, hbm_stack_height=1, system_type="2p5D", dummy_si=False, tim_cond_list=(5, 10, 50), infill_cond_list=(1.6, 19), underfill_cond_list=(1.6, 19), use_isolator=False, isolator_mode="none", isolator_fill_ratio=1.0, isolator_span_ratio=1.0, isolator_thickness=0.03, isolator_z_anchor="bottom", isolator_z_frac=0.35):
+def therm(therm_conf, heatsink_conf, bonding_conf, heatsink, out_dir, project_name, simtype = "Anemoi", is_repeat = False, hbm_stack_height = 1, system_type = "2p5D", dummy_si = False, tim_cond_list = (5, 10, 50), infill_cond_list = (1.6, 19), underfill_cond_list = (1.6, 19)):
 
     chiplet_tree = parse_all_chiplets(therm_conf)
-    #if tim_cond_list is not None and len(tim_cond_list) > 0:
-        #conductivity_values["TIM0p5"] = float(tim_cond_list[0])
-        #print("DBG using TIM conductivity =", conductivity_values["TIM0p5"])
     (w_top, l_top) = recursive_chiplet_sizing(chiplet_tree[0], None)
 
     # first chip at 0,0
@@ -2481,16 +2107,15 @@ def therm(therm_conf, heatsink_conf, bonding_conf, heatsink, out_dir, project_na
     # dedeepyo : 29-Jan-2025 #
 
     # now, draw everything
-    
+    os.makedirs(out_dir, exist_ok=True)
     #limits = determine_draw_lim(boxes)
     #draw_fig(boxes,out_dir,"post",limits)
     #draw_fig_3D_zoom(boxes,out_dir,"post",limits)
-    #os.makedirs(out_dir, exist_ok=True)
-    #limits2d = determine_draw_lim(boxes)
-    #limits3d = determine_draw_lim_3d(boxes)
-    #draw_fig(boxes,out_dir,"post",limits2d)
-    #draw_fig_3D_zoom(boxes,out_dir,"post",limits3d)
-    #print("Placement finished, plots generated")
+    limits2d = determine_draw_lim(boxes)
+    limits3d = determine_draw_lim_3d(boxes)
+    draw_fig(boxes,out_dir,"post",limits2d)
+    draw_fig_3D_zoom(boxes,out_dir,"post",limits3d)
+    print("Placement finished, plots generated")
     # print(str(boxes))
     # return #TODO: Comment out later.
 
@@ -2580,62 +2205,6 @@ def therm(therm_conf, heatsink_conf, bonding_conf, heatsink, out_dir, project_na
     bonding_box_list = create_all_bonding(box_list = boxes, name_type_dict = bonding_name_type_dict, bonding_list = bonding_list) #        
     TIM_boxes = create_TIM_to_heatsink(box_list = boxes, material = "TIM0p5", min_TIM_height = min_TIM_height, system_type = system_type)
     heatsink_obj = create_heat_sink(box_list = boxes, heatsink_list = heatsink_list, heatsink_name = heatsink_name, min_TIM_height = min_TIM_height, scale_factor_x = 0, scale_factor_y = 0, area_scale_factor = 1)
-    def dump_box_table(box_list, title):
-        print("\n" + "=" * 100)
-        print(title)
-        print("=" * 100)
-        for b in sorted(box_list, key=lambda x: (x.start_z, x.start_x, x.start_y)):
-            cp = getattr(b, "chiplet_parent", None)
-            ctype = cp.get_chiplet_type() if cp is not None else "None"
-            print(
-                f"{b.name:45s} "
-                f"type={ctype:15s} "
-                f"x=[{b.start_x:.3f},{b.start_x+b.width:.3f}] "
-                f"y=[{b.start_y:.3f},{b.start_y+b.length:.3f}] "
-                f"z=[{b.start_z:.3f},{b.start_z+b.height:.3f}] "
-                f"dx={b.width:.3f} dy={b.length:.3f} dz={b.height:.3f}"
-            )
-    dump_box_table(boxes, "MAIN BOXES")
-    dump_box_table(bonding_box_list, "BONDING BOXES")
-    dump_box_table(TIM_boxes, "TIM BOXES")
-    print("HEATSINK OBJ =", heatsink_obj)
-    isolator_boxes = create_isolator_boxes(
-        boxes,
-        isolator_mode=isolator_mode if use_isolator else "none",
-        isolator_fill_ratio=isolator_fill_ratio,
-        isolator_span_ratio=isolator_span_ratio,
-        isolator_thickness=isolator_thickness,
-        isolator_z_anchor=isolator_z_anchor,
-        isolator_z_frac=isolator_z_frac
-    )
-        #isolator_boxes = create_tim_gap_isolators(boxes, TIM_boxes, mode="none", shrink_ratio=1)
-    os.makedirs(out_dir, exist_ok=True)
-    plot_all = list(boxes) + list(bonding_box_list) + list(TIM_boxes) + list(isolator_boxes)
-    plot_chiplets = filter_boxes_for_plot(plot_all, "chiplets")
-    plot_interface = filter_boxes_for_plot(plot_all, "interface")
-
-    limits2d_all = determine_draw_lim(plot_all)
-    limits3d_all = determine_draw_lim_3d(plot_all)
-    draw_fig(plot_all, out_dir, "post_full", limits2d_all)
-    draw_fig_3D_zoom(plot_all, out_dir, "post_full", limits3d_all)
-
-    limits2d_chiplets = determine_draw_lim(plot_chiplets)
-    limits3d_chiplets = determine_draw_lim_3d(plot_chiplets)
-    draw_fig(plot_chiplets, out_dir, "post_chiplets", limits2d_chiplets)
-    draw_fig_3D_zoom(plot_chiplets, out_dir, "post_chiplets", limits3d_chiplets)
-
-    limits2d_interface = determine_draw_lim(plot_interface)
-    limits3d_interface = determine_draw_lim_3d(plot_interface)
-    draw_fig(plot_interface, out_dir, "post_interface", limits2d_interface)
-    draw_fig_3D_zoom(plot_interface, out_dir, "post_interface", limits3d_interface)
-
-    print("Thermal plots generated")
-    #debug
-    print("DBG use_isolator =", use_isolator)
-    print("DBG num_isolator_boxes =", len(isolator_boxes))
-    for b in isolator_boxes:
-        print("DBG isolator box:", b.name, b.start_x, b.start_y, b.start_z, b.width, b.length, b.height)
-    #debug
     create_power_source_backside(boxes) #
     power_dict = initialize_power_dict_values(boxes)
 
@@ -2690,134 +2259,19 @@ def therm(therm_conf, heatsink_conf, bonding_conf, heatsink, out_dir, project_na
     # print("Power dict initialized: ", power_dict)
 
     if(is_repeat == False):
-        tim_rows = []
-        htc_rows = []
-        #htc_list = [5000.0, 10000.0, 15000.0, 20000.0]
-        htc_list = [15000.0]
-        #TIM sweep
-        for tim_k in tim_cond_list:
-            conductivity_values["TIM0p5"] = float(tim_k)
-            print("\n" + "=" * 80)
-            print("DBG using TIM conductivity =", conductivity_values["TIM0p5"])
-            print("=" * 80)
-
-            simulation_start_time = time.time()
-            print("Starting simulation at ", simulation_start_time)
-
-            results = simulator_simulate_grid(
-                boxes,
-                bonding_box_list,
-                TIM_boxes,
-                isolator_boxes=isolator_boxes,
-                heatsink_obj=heatsink_obj,
-                heatsink_list=heatsink_list,
-                heatsink_name=heatsink_name,
-                bonding_list=bonding_list,
-                bonding_name_type_dict=bonding_name_type_dict,
-                is_repeat=is_repeat,
-                min_TIM_height=min_TIM_height,
-                power_dict=power_dict,
-                anemoi_parameter_ID=anemoi_parameter_ID,
-                layers=layers
-            )
-
-            simulation_end_time = time.time()
-            print("Simulation finished at ", simulation_end_time)
-            print("Time taken for simulation: ", simulation_end_time - simulation_start_time)
-
-            # save each case separately
-            case_tag = f"tim_{str(tim_k).replace('.', 'p')}"
-            with open(os.path.join(out_dir, f"results_{case_tag}.pkl"), "wb") as f:
-                pickle.dump(results, f)
-            print("Saved results to", os.path.join(out_dir, f"results_{case_tag}.pkl"))
-
-            # write per-case summaries
-            case_summary_dir = os.path.join(out_dir, case_tag)
-            os.makedirs(case_summary_dir, exist_ok=True)
-            write_results_summary(results, case_summary_dir)
-            write_grouped_summary(results, case_summary_dir)
-
-            metrics = extract_key_metrics(results)
-            tim_rows.append({
-                "tim_k": float(tim_k),
-                "gpu_peak": metrics["gpu_peak"],
-                "hbm_peak": metrics["hottest_hbm_peak"],
-                "tim_peak": metrics["tim_peak"],
-            })
-
-        # write overall sweep summary
-        write_tim_sweep_summary(tim_rows, out_dir)
-
-        #HTC sweep
-        for htc_val in htc_list:
-            heatsink_obj["hc"] = float(htc_val)
-            print("\n" + "=" * 80)
-            print("DBG using HTC =", heatsink_obj["hc"])
-            print("=" * 80)
-
-            simulation_start_time = time.time()
-            print("Starting HTC sweep simulation at ", simulation_start_time)
-
-            results = run_single_case(
-                boxes,
-                bonding_box_list,
-                TIM_boxes,
-                isolator_boxes,
-                heatsink_obj,
-                heatsink_list,
-                heatsink_name,
-                bonding_list,
-                bonding_name_type_dict,
-                is_repeat,
-                min_TIM_height,
-                power_dict,
-                anemoi_parameter_ID,
-                layers
-            )
-
-            simulation_end_time = time.time()
-            print("Simulation finished at ", simulation_end_time)
-            print("Time taken for simulation: ", simulation_end_time - simulation_start_time)
-
-            case_tag = f"htc_{int(htc_val)}"
-            with open(os.path.join(out_dir, f"results_{case_tag}.pkl"), "wb") as f:
-                pickle.dump(results, f)
-            print("Saved results to", os.path.join(out_dir, f"results_{case_tag}.pkl"))
-
-            case_summary_dir = os.path.join(out_dir, case_tag)
-            os.makedirs(case_summary_dir, exist_ok=True)
-            write_results_summary(results, case_summary_dir)
-            write_grouped_summary(results, case_summary_dir)
-
-            metrics = extract_key_metrics(results)
-            htc_rows.append({
-                "htc": float(htc_val),
-                "gpu_peak": metrics["gpu_peak"],
-                "hbm_peak": metrics["hottest_hbm_peak"],
-                "tim_peak": metrics["tim_peak"],
-            })
-
-        write_htc_sweep_summary(htc_rows, out_dir)
+        simulation_start_time = time.time()
+        print("Starting simulation at ", simulation_start_time)
         
+        is_repeat = is_repeat # False # False # True if the simulation is repeated with different powers, False if only one simulation is run.
+        results = simulator_simulate_grid(boxes, bonding_box_list, TIM_boxes, heatsink_obj = heatsink_obj, heatsink_list = heatsink_list, heatsink_name = heatsink_name, bonding_list = bonding_list, bonding_name_type_dict = bonding_name_type_dict, is_repeat = is_repeat,  min_TIM_height = min_TIM_height, power_dict = power_dict, anemoi_parameter_ID = anemoi_parameter_ID, layers = layers) #
         
-
-        
-        return
-        #simulation_start_time = time.time()
-        #print("Starting simulation at ", simulation_start_time)
-        
-        #is_repeat = is_repeat # False # False # True if the simulation is repeated with different powers, False if only one simulation is run.
-        #results = simulator_simulate_grid(boxes, bonding_box_list, TIM_boxes, heatsink_obj = heatsink_obj, heatsink_list = heatsink_list, heatsink_name = heatsink_name, bonding_list = bonding_list, bonding_name_type_dict = bonding_name_type_dict, is_repeat = is_repeat,  min_TIM_height = min_TIM_height, power_dict = power_dict, anemoi_parameter_ID = anemoi_parameter_ID, layers = layers) #
-        
-        #simulation_end_time = time.time()
-        #print("Simulation finished at ", simulation_end_time)
-        #print("Time taken for simulation: ", simulation_end_time - simulation_start_time)
-        #with open(os.path.join(out_dir, "results.pkl"), "wb") as f:
-            #pickle.dump(results, f)
-        #print("Saved results to", os.path.join(out_dir, "results.pkl"))
-        #write_results_summary(results, out_dir)
-        #write_grouped_summary(results, out_dir)
-        #return #TODO: Comment out later
+        simulation_end_time = time.time()
+        print("Simulation finished at ", simulation_end_time)
+        print("Time taken for simulation: ", simulation_end_time - simulation_start_time)
+        with open(os.path.join(out_dir, "results.pkl"), "wb") as f:
+            pickle.dump(results, f)
+        print("Saved results to", os.path.join(out_dir, "results.pkl"))
+        return #TODO: Comment out later
 
     # dedeepyo : 4-Jun-25
 
@@ -3133,28 +2587,6 @@ def convert(source: Path, destination: Path, hbm_stack_height = 1) -> None:
         output_lines.pop()
 
     destination.write_text("\n".join(output_lines) + "\n")
-
-def classify_result_name(name):
-    if "isolator" in name.lower():
-        return "isolator"
-    if "bonding" in name:
-        return "bonding"
-    if "TIM" in name:
-        return "TIM"
-    if "Dummy_Si" in name:
-        return "Dummy"
-    if ".GPU" in name or name.endswith("GPU"):
-        return "GPU"
-    if "HBM" in name:
-        return "HBM"
-    if "substrate" in name or "interposer" in name or "PCB" in name:
-        return "substrate_like"
-    if "Power_Source" in name:
-        return "Power_Source"
-    return "other"
-
-
-
 
 if __name__ == '__main__':
     therm()
