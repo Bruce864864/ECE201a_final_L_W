@@ -764,11 +764,11 @@ def effective_k_for_box(box):
     if cls == "Dummy_Si":
         return 105.0
     if cls == "HBM":
-        return 15.0
+        return 10.0
     if cls == "GPU":
-        return 60.0
+        return 40.0
     if cls == "substrate_like":
-        return 4.0
+        return 2.0
     if cls == "Power_Source":
         return 10.0
     return 1.0

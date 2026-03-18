@@ -764,11 +764,11 @@ def effective_k_for_box(box):
     if cls == "Dummy_Si":
         return 105.0
     if cls == "HBM":
-        return 15.0
+        return 10.0
     if cls == "GPU":
-        return 60.0
+        return 40.0
     if cls == "substrate_like":
-        return 4.0
+        return 2.0
     if cls == "Power_Source":
         return 10.0
     return 1.0
@@ -789,34 +789,6 @@ def build_cut_planes(all_boxes):
         zs.extend([b.start_z, b.start_z + b.height])
 
     return unique_sorted(xs), unique_sorted(ys), unique_sorted(zs)
-    
-def refine_axis_cuts(cuts, factor):
-    if factor <= 1:
-        return cuts
-    new_cuts = []
-    for i in range(len(cuts) - 1):
-        a = cuts[i]
-        b = cuts[i + 1]
-        if i == 0:
-            new_cuts.append(a)
-        step = (b - a) / factor
-        for k in range(1, factor):
-            new_cuts.append(a + k * step)
-        new_cuts.append(b)
-    return unique_sorted(new_cuts)
-
-def refine_cut_planes_by_level(xs, ys, zs, mesh_level):
-    if mesh_level == 'coarse':
-        fx, fy, fz = 1, 1, 1
-    elif mesh_level == 'medium':
-        fx, fy, fz = 2, 2, 1
-    else:
-        fx, fy, fz = 4, 4, 1
-
-    xs = refine_axis_cuts(xs, fx)
-    ys = refine_axis_cuts(ys, fy)
-    zs = refine_axis_cuts(zs, fz)
-    return xs, ys, zs
     
 def build_cells_from_cuts(xs, ys, zs):
     cells = []
@@ -892,6 +864,7 @@ def assign_power_to_cells(cells):
     from collections import defaultdict
 
     groups = defaultdict(list)
+
     for c in cells:
         owner = c.get("owner", None)
         if owner is None:
@@ -904,35 +877,15 @@ def assign_power_to_cells(cells):
         if total_power == 0.0:
             continue
 
-        cp = getattr(owner, "chiplet_parent", None)
-        ctype = cp.get_chiplet_type() if cp is not None else ""
-
-        emit_group = group
-
-        if ctype == "GPU" or ctype == "HBM" or ctype.startswith("HBM_l"):
-            z_mid = owner.start_z + 0.5 * owner.height
-            z_planes = sorted(set(round(c["cz"], 12) for c in group))
-            if len(z_planes) >= 3:
-                z_planes_sorted = sorted(z_planes, key=lambda z: abs(z - z_mid))
-                keep_planes = set(z_planes_sorted[:3])
-                emit_group = [c for c in group if round(c["cz"], 12) in keep_planes]
-            elif len(z_planes) == 2:
-                keep_planes = set(z_planes)
-                emit_group = [c for c in group if round(c["cz"], 12) in keep_planes]
-            else:
-                emit_group = group
-
-
-        total_vol = sum(c["dx"] * c["dy"] * c["dz"] for c in emit_group)
+        total_vol = sum(c["dx"] * c["dy"] * c["dz"] for c in group)
         if total_vol <= 0:
             continue
 
-        for c in emit_group:
+        for c in group:
             frac = (c["dx"] * c["dy"] * c["dz"]) / total_vol
             c["power"] += total_power * frac
 
-def spice_node_name(cell):
-    return f"n_{cell['ix']}_{cell['iy']}_{cell['iz']}"
+
 
 def solve_grid_cells(cells, xs, ys, zs, hc=15000.0, T_amb=45.0):
     n = len(cells)
@@ -1030,91 +983,6 @@ def collect_results_from_cells(cells, T):
 
     return results
     
-def write_spice_netlist(cells, heatsink_obj, out_path, t_amb=45.0):
-    idx_map = {(c["ix"], c["iy"], c["iz"]): c for c in cells}
-
-    hc = 15000.0
-    if isinstance(heatsink_obj, dict) and "hc" in heatsink_obj:
-        try:
-            hc = float(heatsink_obj["hc"])
-        except:
-            pass
-
-    lines = []
-    lines.append("* thermal network")
-    lines.append(".option numdgt=6")
-    lines.append(f"Vamb amb 0 {t_amb}")
-
-    rcount = 0
-    icount = 0
-
-    def add_res_between_cells(c1, c2, direction):
-        nonlocal rcount
-        k1 = c1["k"]
-        k2 = c2["k"]
-
-        if direction == "x":
-            area_mm2 = c1["dy"] * c1["dz"]
-            r1 = (0.5 * c1["dx"] * 1e-3) / (k1 * area_mm2 * 1e-6)
-            r2 = (0.5 * c2["dx"] * 1e-3) / (k2 * area_mm2 * 1e-6)
-        elif direction == "y":
-            area_mm2 = c1["dx"] * c1["dz"]
-            r1 = (0.5 * c1["dy"] * 1e-3) / (k1 * area_mm2 * 1e-6)
-            r2 = (0.5 * c2["dy"] * 1e-3) / (k2 * area_mm2 * 1e-6)
-        else:
-            area_mm2 = c1["dx"] * c1["dy"]
-            r1 = (0.5 * c1["dz"] * 1e-3) / (k1 * area_mm2 * 1e-6)
-            r2 = (0.5 * c2["dz"] * 1e-3) / (k2 * area_mm2 * 1e-6)
-
-        rval = max(r1 + r2, 1e-12)
-        n1 = spice_node_name(c1)
-        n2 = spice_node_name(c2)
-        lines.append(f"R{rcount} {n1} {n2} {rval}")
-        rcount += 1
-
-    for c in cells:
-        ix, iy, iz = c["ix"], c["iy"], c["iz"]
-
-        for dx, dy, dz, direction in [
-            (1, 0, 0, "x"),
-            (0, 1, 0, "y"),
-            (0, 0, 1, "z"),
-        ]:
-            nb_key = (ix + dx, iy + dy, iz + dz)
-            if nb_key in idx_map:
-                nb = idx_map[nb_key]
-                add_res_between_cells(c, nb, direction)
-
-    occupied = set(idx_map.keys())
-    for c in cells:
-        ix, iy, iz = c["ix"], c["iy"], c["iz"]
-        above = (ix, iy, iz + 1)
-        if above not in occupied:
-            area_top_m2 = c["dx"] * c["dy"] * 1e-6
-            gconv = hc * area_top_m2
-            rval = 1.0 / max(gconv, 1e-12)
-            n = spice_node_name(c)
-            lines.append(f"R{rcount} {n} amb {rval}")
-            rcount += 1
-
-    for c in cells:
-        p = float(c.get("power", 0.0) or 0.0)
-        if p == 0.0:
-            continue
-        n = spice_node_name(c)
-        lines.append(f"I{icount} 0 {n} {p}")
-        icount += 1
-
-    lines.append(".control")
-    lines.append("set filetype=ascii")
-    lines.append("op")
-    lines.append("write thermal_op.raw all")
-    lines.append("quit")
-    lines.append(".endc")
-    lines.append(".end")
-
-    with open(out_path, "w") as f:
-        f.write("\n".join(lines) + "\n")
     
 def safe_chiplet_type_from_cell(cell):
     owner = cell.get("owner", None)
@@ -1328,49 +1196,16 @@ def simulator_simulate_grid(
     min_TIM_height=0.1,
     power_dict=None,
     anemoi_parameter_ID=None,
-    layers=None,
-    dump_spice=False,
-    spice_out_path=None,
-    cells_out_path=None,
-    mesh_level='coarse'
+    layers=None
 ):
     all_boxes = list(boxes) + list(bonding_box_list) + list(TIM_boxes)
 
     xs, ys, zs = build_cut_planes(all_boxes)
-    xs, ys, zs = refine_cut_planes_by_level(xs, ys, zs, mesh_level)
     cells = build_cells_from_cuts(xs, ys, zs)
     cells = filter_tiny_cells(cells, min_dx=1e-3, min_dy=1e-3, min_dz=1e-4)
     cells = assign_cells_to_boxes(cells, all_boxes)
     assign_power_to_cells(cells)
-    print("DBG inside simulator_simulate_grid, dump_spice =", dump_spice)
-    print("DBG inside simulator_simulate_grid, spice_out_path =", spice_out_path)
-    print("DBG inside simulator_simulate_grid, cells_out_path =", cells_out_path)
-    if cells_out_path is not None:
-        print("DBG writing cells.pkl to", cells_out_path)
-        export_cells = []
-        for c in cells:
-            owner = c.get("owner", None)
-            owner_name = owner.name if owner is not None else None
-            export_cells.append({
-                "ix": c["ix"],
-                "iy": c["iy"],
-                "iz": c["iz"],
-                "dx": c["dx"],
-                "dy": c["dy"],
-                "dz": c["dz"],
-                "cx": c["cx"],
-                "cy": c["cy"],
-                "cz": c["cz"],
-                "k": c["k"],
-                "power": c["power"],
-                "owner_name": owner_name
-            })
-        with open(cells_out_path, "wb") as f:
-            pickle.dump(export_cells, f)
-
-    if dump_spice and spice_out_path is not None:
-        print("DBG writing netlist to", spice_out_path)
-        write_spice_netlist(cells, heatsink_obj, spice_out_path, t_amb=45.0)
+    
     #debug
     if DEBUG_THERM:
         print("DBG num_boxes =", len(all_boxes))
@@ -1409,7 +1244,7 @@ def simulator_simulate_grid(
         except:
             pass
 
-    T = solve_grid_cells(cells, xs, ys, zs, hc=hc, T_amb=45.0)
+    T = solve_grid_cells(cells, xs, ys, zs, hc=hc, T_amb=25.0)
     results = collect_results_from_cells(cells, T)
     return results
 
@@ -1430,11 +1265,8 @@ def simulator_simulate_grid(
 @click.option('--tim_cond_list', default = [10.0], multiple = True, help='The TIM conductivity list')
 @click.option('--infill_cond_list', default = [1.6], multiple = True, help='The infill conductivity list')
 @click.option('--underfill_cond_list', default = [1.6], multiple = True, help='The underfill conductivity list')
-@click.option('--dump_spice', default=True, type=bool)
-@click.option('--spice_out', default='thermal_netlist.cir')
-@click.option('--mesh_level', default='coarse', type=click.Choice(['coarse', 'medium', 'fine']))
 
-def therm(therm_conf, heatsink_conf, bonding_conf, heatsink, out_dir, project_name, simtype="Anemoi", is_repeat=False, hbm_stack_height=1, system_type="2p5D", dummy_si=False, tim_cond_list=(5, 10, 50), infill_cond_list=(1.6, 19), underfill_cond_list=(1.6, 19), dump_spice=True, spice_out='thermal_netlist.cir', mesh_level='coarse'):
+def therm(therm_conf, heatsink_conf, bonding_conf, heatsink, out_dir, project_name, simtype="Anemoi", is_repeat=False, hbm_stack_height=1, system_type="2p5D", dummy_si=False, tim_cond_list=(5, 10, 50), infill_cond_list=(1.6, 19), underfill_cond_list=(1.6, 19)):
 
     chiplet_tree = parse_all_chiplets(therm_conf)
     #if tim_cond_list is not None and len(tim_cond_list) > 0:
@@ -2453,10 +2285,7 @@ def therm(therm_conf, heatsink_conf, bonding_conf, heatsink, out_dir, project_na
     if(is_repeat == False):
         simulation_start_time = time.time()
         print("Starting simulation at ", simulation_start_time)
-        spice_out_path = os.path.join(out_dir, spice_out)
-        cells_out_path = os.path.join(out_dir, "cells.pkl")
-        print("DBG spice_out_path =", spice_out_path)
-        print("DBG cells_out_path =", cells_out_path)
+
         results = simulator_simulate_grid(
             boxes,
             bonding_box_list,
@@ -2470,11 +2299,7 @@ def therm(therm_conf, heatsink_conf, bonding_conf, heatsink, out_dir, project_na
             min_TIM_height=min_TIM_height,
             power_dict=power_dict,
             anemoi_parameter_ID=anemoi_parameter_ID,
-            layers=layers,
-            dump_spice=dump_spice,
-            spice_out_path=spice_out_path,
-            cells_out_path=cells_out_path,
-            mesh_level=mesh_level
+            layers=layers
         )
 
         simulation_end_time = time.time()
